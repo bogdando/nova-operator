@@ -29,68 +29,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-type Cell struct {
-	CellName                 types.NamespacedName
-	MariaDBDatabaseName      types.NamespacedName
-	CellConductorName        types.NamespacedName
-	CellDBSyncJobName        types.NamespacedName
-	ConductorStatefulSetName types.NamespacedName
-	TransportURLName         types.NamespacedName
-}
-
-func NewCell(novaName types.NamespacedName, cell string) Cell {
-	cellName := types.NamespacedName{
-		Namespace: novaName.Namespace,
-		Name:      novaName.Name + "-" + cell,
-	}
-	c := Cell{
-		CellName: cellName,
-		MariaDBDatabaseName: types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      "nova-" + cell,
-		},
-		CellConductorName: types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      cellName.Name + "-conductor",
-		},
-		CellDBSyncJobName: types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      cellName.Name + "-conductor-db-sync",
-		},
-		ConductorStatefulSetName: types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      cellName.Name + "-conductor",
-		},
-		TransportURLName: types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      cell + "-transport",
-		},
-	}
-
-	if cell == "cell0" {
-		c.TransportURLName = types.NamespacedName{
-			Namespace: novaName.Namespace,
-			Name:      "nova-api-transport",
-		}
-	}
-
-	return c
-}
-
 var _ = Describe("Nova multicell", func() {
 	var novaName types.NamespacedName
-	var mariaDBDatabaseNameForAPI types.NamespacedName
-	var cell0 Cell
-	var cell1 Cell
-	var cell2 Cell
-	var novaAPIName types.NamespacedName
-	var novaAPIdeploymentName types.NamespacedName
-	var novaAPIKeystoneEndpointName types.NamespacedName
-	var novaKeystoneServiceName types.NamespacedName
-	var novaSchedulerName types.NamespacedName
-	var novaSchedulerStatefulSetName types.NamespacedName
-	var novaMetadataName types.NamespacedName
-	var novaMetadataStatefulSetName types.NamespacedName
+	var novaNames NovaNames
+	var cell0 CellNames
+	var cell1 CellNames
+	var cell2 CellNames
 
 	BeforeEach(func() {
 		// Uncomment this if you need the full output in the logs from gomega
@@ -101,45 +45,10 @@ var _ = Describe("Nova multicell", func() {
 			Namespace: namespace,
 			Name:      uuid.New().String(),
 		}
-		mariaDBDatabaseNameForAPI = types.NamespacedName{
-			Namespace: namespace,
-			Name:      "nova-api",
-		}
-		novaAPIName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaName.Name + "-api",
-		}
-		novaAPIdeploymentName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaAPIName.Name,
-		}
-		novaKeystoneServiceName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      "nova",
-		}
-		novaAPIKeystoneEndpointName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      "nova",
-		}
-		novaSchedulerName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaName.Name + "-scheduler",
-		}
-		novaSchedulerStatefulSetName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaSchedulerName.Name,
-		}
-		novaMetadataName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaName.Name + "-metadata",
-		}
-		novaMetadataStatefulSetName = types.NamespacedName{
-			Namespace: namespace,
-			Name:      novaMetadataName.Name,
-		}
-		cell0 = NewCell(novaName, "cell0")
-		cell1 = NewCell(novaName, "cell1")
-		cell2 = NewCell(novaName, "cell2")
+		novaNames = GetNovaNames(novaName, []string{"cell0", "cell1", "cell2"})
+		cell0 = novaNames.Cells["cell0"]
+		cell1 = novaNames.Cells["cell1"]
+		cell2 = novaNames.Cells["cell2"]
 	})
 
 	When("Nova CR instance is created with 3 cells", func() {
@@ -201,11 +110,11 @@ var _ = Describe("Nova multicell", func() {
 			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Status().Update(ctx, keystoneAPI.DeepCopy())).Should(Succeed())
 			}, timeout, interval).Should(Succeed())
-			th.SimulateKeystoneServiceReady(novaKeystoneServiceName)
+			th.SimulateKeystoneServiceReady(novaNames.KeystoneServiceName)
 		})
 
 		It("creates cell0 NovaCell", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 
@@ -256,13 +165,13 @@ var _ = Describe("Nova multicell", func() {
 		})
 
 		It("creates NovaAPI", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 			th.SimulateJobSuccess(cell0.CellDBSyncJobName)
 			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
 
-			api := GetNovaAPI(novaAPIName)
+			api := GetNovaAPI(novaNames.APIName)
 			Expect(api.Spec.Replicas).Should(BeEquivalentTo(1))
 			Expect(api.Spec.Cell0DatabaseHostname).To(Equal("hostname-for-db-for-api"))
 			Expect(api.Spec.Cell0DatabaseHostname).To(Equal(api.Spec.APIDatabaseHostname))
@@ -271,7 +180,7 @@ var _ = Describe("Nova multicell", func() {
 			configDataMap := th.GetConfigMap(
 				types.NamespacedName{
 					Namespace: namespace,
-					Name:      fmt.Sprintf("%s-config-data", novaAPIName.Name),
+					Name:      fmt.Sprintf("%s-config-data", novaNames.APIName.Name),
 				},
 			)
 			Expect(configDataMap.Data).Should(HaveKey("01-nova.conf"))
@@ -282,16 +191,16 @@ var _ = Describe("Nova multicell", func() {
 				ContainSubstring("[api_database]\nconnection = mysql+pymysql://nova_api:12345678@hostname-for-db-for-api/nova_api"),
 			)
 
-			th.SimulateStatefulSetReplicaReady(novaAPIdeploymentName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIDeploymentName)
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.DeploymentReadyCondition,
 				corev1.ConditionTrue,
 			)
 
-			th.SimulateKeystoneEndpointReady(novaAPIKeystoneEndpointName)
+			th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 			th.ExpectCondition(
 				novaName,
 				ConditionGetterFunc(NovaConditionGetter),
@@ -301,13 +210,13 @@ var _ = Describe("Nova multicell", func() {
 		})
 
 		It("creates all cell DBs", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateJobSuccess(cell0.CellDBSyncJobName)
 			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
-			th.SimulateStatefulSetReplicaReady(novaAPIdeploymentName)
-			th.SimulateKeystoneEndpointReady(novaAPIKeystoneEndpointName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIDeploymentName)
+                	th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 
 			th.SimulateMariaDBDatabaseCompleted(cell1.MariaDBDatabaseName)
 			th.ExpectCondition(
@@ -346,13 +255,13 @@ var _ = Describe("Nova multicell", func() {
 		})
 
 		It("creates cell1 NovaCell", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 			th.SimulateJobSuccess(cell0.CellDBSyncJobName)
 			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
-			th.SimulateStatefulSetReplicaReady(novaAPIdeploymentName)
-			th.SimulateKeystoneEndpointReady(novaAPIKeystoneEndpointName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIDeploymentName)
+                	th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 			th.SimulateMariaDBDatabaseCompleted(cell1.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell1.TransportURLName)
 
@@ -401,15 +310,15 @@ var _ = Describe("Nova multicell", func() {
 			)
 		})
 		It("creates cell2 NovaCell", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 			th.SimulateJobSuccess(cell0.CellDBSyncJobName)
 			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
-			th.SimulateStatefulSetReplicaReady(novaAPIdeploymentName)
-			th.SimulateKeystoneEndpointReady(novaAPIKeystoneEndpointName)
-			th.SimulateStatefulSetReplicaReady(novaSchedulerStatefulSetName)
-			th.SimulateStatefulSetReplicaReady(novaMetadataStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIDeploymentName)
+                	th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.MetadataStatefulSetName)
 			th.SimulateMariaDBDatabaseCompleted(cell1.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell1.TransportURLName)
 			th.SimulateJobSuccess(cell1.CellDBSyncJobName)
@@ -514,7 +423,7 @@ var _ = Describe("Nova multicell", func() {
 			)
 		})
 		It("creates Nova API even if cell1 and cell2 fails", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
 			th.SimulateJobSuccess(cell0.CellDBSyncJobName)
@@ -527,10 +436,10 @@ var _ = Describe("Nova multicell", func() {
 			th.SimulateJobFailure(cell1.CellDBSyncJobName)
 
 			// NovaAPI is still created
-			GetNovaAPI(novaAPIName)
-			th.SimulateStatefulSetReplicaReady(novaAPIdeploymentName)
-			th.SimulateKeystoneEndpointReady(novaAPIKeystoneEndpointName)
-			th.ExpectCondition(
+			GetNovaAPI(novaNames.APIName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIDeploymentName)
+                	th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
+			ExpectCondition(
 				novaName,
 				ConditionGetterFunc(NovaConditionGetter),
 				novav1.NovaAPIReadyCondition,
@@ -544,7 +453,7 @@ var _ = Describe("Nova multicell", func() {
 			)
 		})
 		It("does not create cell1 if cell0 fails as cell1 needs API access", func() {
-			th.SimulateMariaDBDatabaseCompleted(mariaDBDatabaseNameForAPI)
+			th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabase)
 			th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
 			th.SimulateMariaDBDatabaseCompleted(cell1.MariaDBDatabaseName)
 			th.SimulateTransportURLReady(cell0.TransportURLName)
@@ -556,6 +465,7 @@ var _ = Describe("Nova multicell", func() {
 		})
 	})
 
+        # TODO rewrite for novaNames
 	When("Nova CR instance is created with collapsed cell deployment", func() {
 		BeforeEach(func() {
 			DeferCleanup(k8sClient.Delete, ctx, CreateNovaSecret(namespace, SecretName))
