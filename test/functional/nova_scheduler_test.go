@@ -30,26 +30,22 @@ import (
 )
 
 var _ = Describe("NovaScheduler controller", func() {
-	var novaSchedulerName types.NamespacedName
-
 	BeforeEach(func() {
 		// Uncomment this if you need the full output in the logs from gomega
 		// matchers
 		// format.MaxLength = 0
 		DeferCleanup(
-			k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
+			k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.SchedulerName.Namespace, MessageBusSecretName))
+
 		spec := GetDefaultNovaSchedulerSpec()
 		spec["customServiceConfig"] = "foo=bar"
-		instance := CreateNovaScheduler(namespace, spec)
-		novaSchedulerName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-		DeferCleanup(DeleteInstance, instance)
-
+		DeferCleanup(DeleteInstance, CreateNovaScheduler(novaNames.SchedulerName, spec))
 	})
 
 	When("a NovaScheduler CR is created pointing to a non existent Secret", func() {
 		It("is not Ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -57,7 +53,7 @@ var _ = Describe("NovaScheduler controller", func() {
 		})
 
 		It("has empty Status fields", func() {
-			instance := GetNovaScheduler(novaSchedulerName)
+			instance := GetNovaScheduler(novaNames.SchedulerName)
 			// NOTE(gibi): Hash and Endpoints have `omitempty` tags so while
 			// they are initialized to {} that value is omited from the output
 			// when sent to the client. So we see nils here.
@@ -67,7 +63,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("is missing the secret", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionFalse,
@@ -81,7 +77,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "not-relevant-secret",
-					Namespace: namespace,
+					Namespace: novaNames.SchedulerName.Namespace,
 				},
 			}
 			Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
@@ -90,7 +86,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("is not Ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -99,7 +95,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("is missing the secret", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionFalse,
@@ -113,7 +109,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      SecretName,
-					Namespace: namespace,
+					Namespace: novaNames.SchedulerName.Namespace,
 				},
 				Data: map[string][]byte{
 					"NovaPassword": []byte("12345678"),
@@ -125,7 +121,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("is not Ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -134,7 +130,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("reports that the inputes are not ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionFalse,
@@ -145,12 +141,12 @@ var _ = Describe("NovaScheduler controller", func() {
 	When("the Secret is created with all the expected fields", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.SchedulerName.Namespace, SecretName))
 		})
 
 		It("reports that input is ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionTrue,
@@ -161,7 +157,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			// NOTE(gibi): NovaScheduler has no external dependency right now to
 			// generate the configs.
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ServiceConfigReadyCondition,
 				corev1.ConditionTrue,
@@ -169,8 +165,8 @@ var _ = Describe("NovaScheduler controller", func() {
 
 			configDataMap := th.GetConfigMap(
 				types.NamespacedName{
-					Namespace: namespace,
-					Name:      fmt.Sprintf("%s-config-data", novaSchedulerName.Name),
+					Namespace: novaNames.SchedulerName.Namespace,
+					Name:      fmt.Sprintf("%s-config-data", novaNames.SchedulerName.Name),
 				},
 			)
 			Expect(configDataMap).ShouldNot(BeNil())
@@ -184,7 +180,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("stored the input hash in the Status", func() {
 			Eventually(func(g Gomega) {
-				novaScheduler := GetNovaScheduler(novaSchedulerName)
+				novaScheduler := GetNovaScheduler(novaNames.SchedulerName)
 				g.Expect(novaScheduler.Status.Hash).Should(HaveKeyWithValue("input", Not(BeEmpty())))
 			}, timeout, interval).Should(Succeed())
 
@@ -194,39 +190,34 @@ var _ = Describe("NovaScheduler controller", func() {
 	When("the NovaScheduler is deleted", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.SchedulerName.Namespace, SecretName))
 		})
 		It("deletes the generated ConfigMaps", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ServiceConfigReadyCondition,
 				corev1.ConditionTrue,
 			)
 
-			DeleteInstance(GetNovaScheduler(novaSchedulerName))
+			DeleteInstance(GetNovaScheduler(novaNames.SchedulerName))
 
 			Eventually(func() []corev1.ConfigMap {
-				return th.ListConfigMaps(novaSchedulerName.Name).Items
+				return th.ListConfigMaps(novaNames.SchedulerName.Name).Items
 			}, timeout, interval).Should(BeEmpty())
 		})
 	})
 
 	When("the NovaScheduler is created with a proper Secret", func() {
-		var statefulSetName types.NamespacedName
 
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
-			statefulSetName = types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaSchedulerName.Name,
-			}
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.SchedulerName.Namespace, SecretName))
 		})
 
 		It(" reports input ready", func() {
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionTrue,
@@ -235,7 +226,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("creates a StatefulSet for the nova-scheduler service", func() {
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.DeploymentReadyCondition,
 				corev1.ConditionFalse,
@@ -243,7 +234,7 @@ var _ = Describe("NovaScheduler controller", func() {
 				condition.DeploymentReadyRunningMessage,
 			)
 
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.SchedulerStatefulSetName)
 			Expect(int(*ss.Spec.Replicas)).To(Equal(1))
 			Expect(ss.Spec.Template.Spec.Volumes).To(HaveLen(2))
 			Expect(ss.Spec.Template.Spec.Containers).To(HaveLen(1))
@@ -256,33 +247,33 @@ var _ = Describe("NovaScheduler controller", func() {
 		When("the StatefulSet has at least one Replica ready", func() {
 			BeforeEach(func() {
 				th.ExpectConditionWithDetails(
-					novaSchedulerName,
+					novaNames.SchedulerName,
 					ConditionGetterFunc(NovaSchedulerConditionGetter),
 					condition.DeploymentReadyCondition,
 					corev1.ConditionFalse,
 					condition.RequestedReason,
 					condition.DeploymentReadyRunningMessage,
 				)
-				th.SimulateStatefulSetReplicaReady(statefulSetName)
+				th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
 			})
 
 			It("reports that the StatefulSet is ready", func() {
 				th.ExpectCondition(
-					novaSchedulerName,
+					novaNames.SchedulerName,
 					ConditionGetterFunc(NovaSchedulerConditionGetter),
 					condition.DeploymentReadyCondition,
 					corev1.ConditionTrue,
 				)
 
-				novaScheduler := GetNovaScheduler(novaSchedulerName)
+				novaScheduler := GetNovaScheduler(novaNames.SchedulerName)
 				Expect(novaScheduler.Status.ReadyCount).To(BeNumerically(">", 0))
 			})
 		})
 
 		It("is Ready", func() {
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -292,18 +283,16 @@ var _ = Describe("NovaScheduler controller", func() {
 	When("NovaScheduler is created with networkAttachments", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.SchedulerName.Namespace, SecretName))
 
 			spec := GetDefaultNovaSchedulerSpec()
 			spec["networkAttachments"] = []string{"internalapi"}
-			instance := CreateNovaScheduler(namespace, spec)
-			novaSchedulerName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+			DeferCleanup(DeleteInstance, CreateNovaScheduler(novaNames.SchedulerName, spec))
 		})
 
 		It("reports that the definition is missing", func() {
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -311,28 +300,24 @@ var _ = Describe("NovaScheduler controller", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
 			)
 		})
 		It("reports that network attachment is missing", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.SchedulerName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaSchedulerName.Name,
-			}
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.SchedulerStatefulSetName)
 
 			expectedAnnotation, err := json.Marshal(
 				[]networkv1.NetworkSelectionElement{
 					{
 						Name:      "internalapi",
-						Namespace: namespace,
+						Namespace: novaNames.SchedulerName.Namespace,
 					}})
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(ss.Spec.Template.ObjectMeta.Annotations).To(
@@ -341,10 +326,10 @@ var _ = Describe("NovaScheduler controller", func() {
 
 			// We don't add network attachment status annotations to the Pods
 			// to simulate that the network attachments are missing.
-			SimulateStatefulSetReplicaReadyWithPods(statefulSetName, map[string][]string{})
+			SimulateStatefulSetReplicaReadyWithPods(novaNames.SchedulerStatefulSetName, map[string][]string{})
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -354,21 +339,17 @@ var _ = Describe("NovaScheduler controller", func() {
 			)
 		})
 		It("reports that an IP is missing", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.SchedulerName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaSchedulerName.Name,
-			}
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.SchedulerStatefulSetName)
 
 			expectedAnnotation, err := json.Marshal(
 				[]networkv1.NetworkSelectionElement{
 					{
 						Name:      "internalapi",
-						Namespace: namespace,
+						Namespace: novaNames.SchedulerName.Namespace,
 					}})
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(ss.Spec.Template.ObjectMeta.Annotations).To(
@@ -378,12 +359,12 @@ var _ = Describe("NovaScheduler controller", func() {
 			// We simulat that there is no IP associated with the internalapi
 			// network attachment
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {}},
+				novaNames.SchedulerStatefulSetName,
+				map[string][]string{novaNames.SchedulerName.Namespace + "/internalapi": {}},
 			)
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -393,34 +374,30 @@ var _ = Describe("NovaScheduler controller", func() {
 			)
 		})
 		It("reports NetworkAttachmentsReady if the Pods got the proper annotiations", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.SchedulerName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaSchedulerName.Name,
-			}
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {"10.0.0.1"}},
+				novaNames.SchedulerStatefulSetName,
+				map[string][]string{novaNames.SchedulerName.Namespace + "/internalapi": {"10.0.0.1"}},
 			)
 
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionTrue,
 			)
 
 			Eventually(func(g Gomega) {
-				novaScheduler := GetNovaScheduler(novaSchedulerName)
+				novaScheduler := GetNovaScheduler(novaNames.SchedulerName)
 				g.Expect(novaScheduler.Status.NetworkAttachments).To(
-					Equal(map[string][]string{namespace + "/internalapi": {"10.0.0.1"}}))
+					Equal(map[string][]string{novaNames.SchedulerName.Namespace + "/internalapi": {"10.0.0.1"}}))
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -428,30 +405,21 @@ var _ = Describe("NovaScheduler controller", func() {
 		})
 	})
 	When("NovaScheduler is reconfigured", func() {
-		var statefulSetName types.NamespacedName
-
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
-
-			instance := CreateNovaScheduler(namespace, GetDefaultNovaSchedulerSpec())
-			novaSchedulerName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.SchedulerName.Namespace, SecretName))
+			DeferCleanup(DeleteInstance, CreateNovaScheduler(novaNames.SchedulerName, GetDefaultNovaSchedulerSpec()))
 
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ServiceConfigReadyCondition,
 				corev1.ConditionTrue,
 			)
 
-			statefulSetName = types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaSchedulerName.Name,
-			}
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -460,7 +428,7 @@ var _ = Describe("NovaScheduler controller", func() {
 
 		It("applys new NetworkAttachments configuration", func() {
 			Eventually(func(g Gomega) {
-				novaScheduler := GetNovaScheduler(novaSchedulerName)
+				novaScheduler := GetNovaScheduler(novaNames.SchedulerName)
 				novaScheduler.Spec.NetworkAttachments = append(novaScheduler.Spec.NetworkAttachments, "internalapi")
 
 				err := k8sClient.Update(ctx, novaScheduler)
@@ -468,7 +436,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -477,7 +445,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			)
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -485,11 +453,11 @@ var _ = Describe("NovaScheduler controller", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.SchedulerName.Namespace, Name: "internalapi"}
 			DeferCleanup(DeleteInstance, CreateNetworkAttachmentDefinition(internalAPINADName))
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -499,7 +467,7 @@ var _ = Describe("NovaScheduler controller", func() {
 			)
 
 			th.ExpectConditionWithDetails(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -509,26 +477,26 @@ var _ = Describe("NovaScheduler controller", func() {
 			)
 
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {"10.0.0.1"}},
+				novaNames.SchedulerStatefulSetName,
+				map[string][]string{novaNames.SchedulerName.Namespace + "/internalapi": {"10.0.0.1"}},
 			)
 
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionTrue,
 			)
 
 			Eventually(func(g Gomega) {
-				novaScheduler := GetNovaScheduler(novaSchedulerName)
+				novaScheduler := GetNovaScheduler(novaNames.SchedulerName)
 				g.Expect(novaScheduler.Status.NetworkAttachments).To(
-					Equal(map[string][]string{namespace + "/internalapi": {"10.0.0.1"}}))
+					Equal(map[string][]string{novaNames.SchedulerName.Namespace + "/internalapi": {"10.0.0.1"}}))
 
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectCondition(
-				novaSchedulerName,
+				novaNames.SchedulerName,
 				ConditionGetterFunc(NovaSchedulerConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,

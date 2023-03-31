@@ -16,7 +16,8 @@ limitations under the License.
 package functional_test
 
 import (
-	"github.com/google/uuid"
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/openstack-k8s-operators/lib-common/modules/test/helpers"
@@ -29,61 +30,53 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func CreateNovaWith3CellsAndEnsureReady(namespace string) NovaNames {
-	var novaName types.NamespacedName
-	var novaNames NovaNames
-	var cell0 CellNames
-	var cell1 CellNames
-	var cell2 CellNames
+func CreateNovaWith3CellsAndEnsureReady(novaNames NovaNames) {
+	cell0 := novaNames.Cells["cell0"]
+	cell1 := novaNames.Cells["cell1"]
+	cell2 := novaNames.Cells["cell2"]
 
-	novaName = types.NamespacedName{
-		Namespace: namespace,
-		Name:      uuid.New().String(),
-	}
-	novaNames = GetNovaNames(novaName, []string{"cell0", "cell1", "cell2"})
-	cell0 = novaNames.Cells["cell0"]
-	cell1 = novaNames.Cells["cell1"]
-	cell2 = novaNames.Cells["cell2"]
-
-	DeferCleanup(k8sClient.Delete, ctx, CreateNovaSecret(namespace, SecretName))
+	DeferCleanup(k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 	DeferCleanup(
 		k8sClient.Delete,
 		ctx,
-		CreateNovaMessageBusSecret(namespace, "mq-for-api-secret"),
+		CreateNovaMessageBusSecret(cell0.CellName.Namespace, fmt.Sprintf("%s-secret", cell0.TransportURLName.Name)),
 	)
 	DeferCleanup(
 		k8sClient.Delete,
 		ctx,
-		CreateNovaMessageBusSecret(namespace, "mq-for-cell1-secret"),
+		CreateNovaMessageBusSecret(cell1.CellName.Namespace, fmt.Sprintf("%s-secret", cell1.TransportURLName.Name)),
 	)
 	DeferCleanup(
 		k8sClient.Delete,
 		ctx,
-		CreateNovaMessageBusSecret(namespace, "mq-for-cell2-secret"),
+		CreateNovaMessageBusSecret(cell2.CellName.Namespace, fmt.Sprintf("%s-secret", cell2.TransportURLName.Name)),
 	)
 
 	serviceSpec := corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 3306}}}
-	DeferCleanup(th.DeleteDBService, th.CreateDBService(namespace, "db-for-api", serviceSpec))
-	DeferCleanup(th.DeleteDBService, th.CreateDBService(namespace, "db-for-cell1", serviceSpec))
-	DeferCleanup(th.DeleteDBService, th.CreateDBService(namespace, "db-for-cell2", serviceSpec))
+	DeferCleanup(
+		th.DeleteDBService,
+		th.CreateDBService(novaNames.APIMariaDBDatabaseName.Namespace, novaNames.APIMariaDBDatabaseName.Name, serviceSpec))
+	DeferCleanup(th.DeleteDBService, th.CreateDBService(cell0.MariaDBDatabaseName.Namespace, cell0.MariaDBDatabaseName.Name, serviceSpec))
+	DeferCleanup(th.DeleteDBService, th.CreateDBService(cell1.MariaDBDatabaseName.Namespace, cell1.MariaDBDatabaseName.Name, serviceSpec))
+	DeferCleanup(th.DeleteDBService, th.CreateDBService(cell2.MariaDBDatabaseName.Namespace, cell2.MariaDBDatabaseName.Name, serviceSpec))
 
 	spec := GetDefaultNovaSpec()
 	cell0Template := GetDefaultNovaCellTemplate()
-	cell0Template["cellName"] = "cell0"
-	cell0Template["cellDatabaseInstance"] = "db-for-api"
+	cell0Template["cellName"] = cell0.CellName.Name
+	cell0Template["cellDatabaseInstance"] = cell0.MariaDBDatabaseName.Name
 	cell0Template["cellDatabaseUser"] = "nova_cell0"
 
 	cell1Template := GetDefaultNovaCellTemplate()
-	cell1Template["cellName"] = "cell1"
-	cell1Template["cellDatabaseInstance"] = "db-for-cell1"
+	cell1Template["cellName"] = cell1.CellName.Name
+	cell1Template["cellDatabaseInstance"] = cell1.MariaDBDatabaseName.Name
 	cell1Template["cellDatabaseUser"] = "nova_cell1"
-	cell1Template["cellMessageBusInstance"] = "mq-for-cell1"
+	cell1Template["cellMessageBusInstance"] = cell1.TransportURLName.Name
 
 	cell2Template := GetDefaultNovaCellTemplate()
-	cell2Template["cellName"] = "cell2"
-	cell2Template["cellDatabaseInstance"] = "db-for-cell2"
+	cell2Template["cellName"] = cell2.CellName.Name
+	cell2Template["cellDatabaseInstance"] = cell2.MariaDBDatabaseName.Name
 	cell2Template["cellDatabaseUser"] = "nova_cell2"
-	cell2Template["cellMessageBusInstance"] = "mq-for-cell2"
+	cell2Template["cellMessageBusInstance"] = cell2.TransportURLName.Name
 	cell2Template["hasAPIAccess"] = false
 
 	spec["cellTemplates"] = map[string]interface{}{
@@ -91,11 +84,11 @@ func CreateNovaWith3CellsAndEnsureReady(namespace string) NovaNames {
 		"cell1": cell1Template,
 		"cell2": cell2Template,
 	}
-	spec["apiDatabaseInstance"] = "db-for-api"
-	spec["apiMessageBusInstance"] = "mq-for-api"
+	spec["apiDatabaseInstance"] = novaNames.APIMariaDBDatabaseName.Name
+	spec["apiMessageBusInstance"] = cell0.TransportURLName.Name
 
-	DeferCleanup(DeleteInstance, CreateNova(novaName, spec))
-	keystoneAPIName := th.CreateKeystoneAPI(namespace)
+	DeferCleanup(DeleteInstance, CreateNova(novaNames.NovaName, spec))
+	keystoneAPIName := th.CreateKeystoneAPI(novaNames.NovaName.Namespace)
 	DeferCleanup(th.DeleteKeystoneAPI, keystoneAPIName)
 	keystoneAPI := th.GetKeystoneAPI(keystoneAPIName)
 	keystoneAPI.Status.APIEndpoints["internal"] = "http://keystone-internal-openstack.testing"
@@ -104,6 +97,7 @@ func CreateNovaWith3CellsAndEnsureReady(namespace string) NovaNames {
 	}, timeout, interval).Should(Succeed())
 
 	th.SimulateKeystoneServiceReady(novaNames.KeystoneServiceName)
+	// END of common logic with Nova multicell test
 
 	th.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 	th.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
@@ -125,37 +119,33 @@ func CreateNovaWith3CellsAndEnsureReady(namespace string) NovaNames {
 
 	th.SimulateJobSuccess(cell2.CellDBSyncJobName)
 	th.SimulateStatefulSetReplicaReady(cell2.ConductorStatefulSetName)
-	th.SimulateStatefulSetReplicaReady(novaSchedulerStatefulSetName)
-	th.SimulateStatefulSetReplicaReady(novaMetadataStatefulSetName)
+	th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
+	th.SimulateStatefulSetReplicaReady(novaNames.MetadataStatefulSetName)
 	th.ExpectCondition(
-		novaName,
+		novaNames.NovaName,
 		ConditionGetterFunc(NovaConditionGetter),
 		novav1.NovaAllCellsReadyCondition,
 		corev1.ConditionTrue,
 	)
 	th.ExpectCondition(
-		novaName,
+		novaNames.NovaName,
 		ConditionGetterFunc(NovaConditionGetter),
 		condition.ReadyCondition,
 		corev1.ConditionTrue,
 	)
-	return novaNames
 }
 
-var _ = Describe("Nova reconfiguration", func() {
-	var novaNames NovaNames
-
-	BeforeEach(func() {
+var _ = Describe("Nova reconfiguration", Ordered, func() {
+	BeforeAll(func() {
 		// Uncomment this if you need the full output in the logs from gomega
 		// matchers
 		// format.MaxLength = 0
 
-		novaNames = CreateNovaWith3CellsAndEnsureReady(namespace)
-
+		CreateNovaWith3CellsAndEnsureReady(novaNames)
 	})
 	When("cell0 conductor replicas is set to 0", func() {
 		It("sets the deployment replicas to 0", func() {
-			cell0DeploymentName := novaNames.Cells["cell0"].ConductorStatefulSetName
+			cell0DeploymentName := cell0.ConductorStatefulSetName
 
 			deployment := th.GetStatefulSet(cell0DeploymentName)
 			one := int32(1)
@@ -185,10 +175,8 @@ var _ = Describe("Nova reconfiguration", func() {
 	})
 	When("networkAttachemnt is added to a conductor while the definition is missing", func() {
 		It("applys new NetworkAttachments configuration to that Conductor", func() {
-			cell1Names := NewCell(novaName, "cell1")
-
 			Eventually(func(g Gomega) {
-				nova := GetNova(novaName)
+				nova := GetNova(novaNames.NovaName)
 
 				cell1 := nova.Spec.CellTemplates["cell1"]
 				attachments := cell1.ConductorServiceTemplate.NetworkAttachments
@@ -201,7 +189,7 @@ var _ = Describe("Nova reconfiguration", func() {
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectConditionWithDetails(
-				cell1Names.CellConductorName,
+				cell1.CellConductorName,
 				ConditionGetterFunc(NovaConductorConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -209,7 +197,7 @@ var _ = Describe("Nova reconfiguration", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 			th.ExpectConditionWithDetails(
-				cell1Names.CellConductorName,
+				cell1.CellConductorName,
 				ConditionGetterFunc(NovaConductorConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -218,7 +206,7 @@ var _ = Describe("Nova reconfiguration", func() {
 			)
 
 			th.ExpectConditionWithDetails(
-				cell1Names.CellName,
+				cell1.CellName,
 				ConditionGetterFunc(NovaCellConditionGetter),
 				novav1.NovaConductorReadyCondition,
 				corev1.ConditionFalse,
@@ -226,7 +214,7 @@ var _ = Describe("Nova reconfiguration", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 			th.ExpectConditionWithDetails(
-				cell1Names.CellName,
+				cell1.CellName,
 				ConditionGetterFunc(NovaCellConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -235,7 +223,7 @@ var _ = Describe("Nova reconfiguration", func() {
 			)
 
 			th.ExpectConditionWithDetails(
-				novaName,
+				novaNames.NovaName,
 				ConditionGetterFunc(NovaConditionGetter),
 				novav1.NovaAllCellsReadyCondition,
 				corev1.ConditionFalse,
@@ -243,7 +231,7 @@ var _ = Describe("Nova reconfiguration", func() {
 				"NovaCell cell1 is not Ready",
 			)
 			th.ExpectConditionWithDetails(
-				novaName,
+				novaNames.NovaName,
 				ConditionGetterFunc(NovaConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -251,11 +239,11 @@ var _ = Describe("Nova reconfiguration", func() {
 				"NovaCell cell1 is not Ready",
 			)
 
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.NovaName.Namespace, Name: "internalapi"}
 			DeferCleanup(DeleteInstance, CreateNetworkAttachmentDefinition(internalAPINADName))
 
 			th.ExpectConditionWithDetails(
-				novaName,
+				novaNames.NovaName,
 				ConditionGetterFunc(NovaConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -264,12 +252,12 @@ var _ = Describe("Nova reconfiguration", func() {
 			)
 
 			SimulateStatefulSetReplicaReadyWithPods(
-				cell1Names.ConductorStatefulSetName,
-				map[string][]string{namespace + "/internalapi": {"10.0.0.1"}},
+				cell1.ConductorStatefulSetName,
+				map[string][]string{novaNames.NovaName.Namespace + "/internalapi": {"10.0.0.1"}},
 			)
 
 			th.ExpectCondition(
-				novaName,
+				novaNames.NovaName,
 				ConditionGetterFunc(NovaConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,

@@ -33,22 +33,19 @@ import (
 )
 
 var _ = Describe("NovaAPI controller", func() {
-	var novaAPIName types.NamespacedName
-
 	When("a NovaAPI CR is created pointing to a non existent Secret", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+
 			spec := GetDefaultNovaAPISpec()
 			spec["customServiceConfig"] = "foo=bar"
-			instance := CreateNovaAPI(namespace, spec)
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, spec))
 		})
 
 		It("is not Ready", func() {
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -56,7 +53,7 @@ var _ = Describe("NovaAPI controller", func() {
 		})
 
 		It("has empty Status fields", func() {
-			instance := GetNovaAPI(novaAPIName)
+			instance := GetNovaAPI(novaNames.APIName)
 			// NOTE(gibi): Hash and Endpoints have `omitempty` tags so while
 			// they are initialized to {} that value is omited from the output
 			// when sent to the client. So we see nils here.
@@ -68,7 +65,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 		It("is missing the secret", func() {
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionFalse,
@@ -82,7 +79,7 @@ var _ = Describe("NovaAPI controller", func() {
 				secret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "not-relevant-secret",
-						Namespace: namespace,
+						Namespace: novaNames.APIName.Namespace,
 					},
 				}
 				Expect(k8sClient.Create(ctx, secret)).Should(Succeed())
@@ -91,7 +88,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 			It("is not Ready", func() {
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.ReadyCondition,
 					corev1.ConditionFalse,
@@ -100,7 +97,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 			It("is missing the secret", func() {
 				th.ExpectConditionWithDetails(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.InputReadyCondition,
 					corev1.ConditionFalse,
@@ -115,7 +112,7 @@ var _ = Describe("NovaAPI controller", func() {
 				secret := &corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      SecretName,
-						Namespace: namespace,
+						Namespace: novaNames.APIName.Namespace,
 					},
 					Data: map[string][]byte{
 						"NovaPassword": []byte("12345678"),
@@ -127,7 +124,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 			It("is not Ready", func() {
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.ReadyCondition,
 					corev1.ConditionFalse,
@@ -136,7 +133,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 			It("reports that the inputes are not ready", func() {
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.InputReadyCondition,
 					corev1.ConditionFalse,
@@ -147,12 +144,12 @@ var _ = Describe("NovaAPI controller", func() {
 		When("the Secret is created with all the expected fields", func() {
 			BeforeEach(func() {
 				DeferCleanup(
-					k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+					k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			})
 
 			It("reports that input is ready", func() {
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.InputReadyCondition,
 					corev1.ConditionTrue,
@@ -163,7 +160,7 @@ var _ = Describe("NovaAPI controller", func() {
 				// NOTE(gibi): NovaAPI has no external dependency right now to
 				// generate the configs.
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.ServiceConfigReadyCondition,
 					corev1.ConditionTrue,
@@ -171,8 +168,8 @@ var _ = Describe("NovaAPI controller", func() {
 
 				configDataMap := th.GetConfigMap(
 					types.NamespacedName{
-						Namespace: namespace,
-						Name:      fmt.Sprintf("%s-config-data", novaAPIName.Name),
+						Namespace: novaNames.APIName.Namespace,
+						Name:      fmt.Sprintf("%s-config-data", novaNames.APIName.Name),
 					},
 				)
 				Expect(configDataMap).ShouldNot(BeNil())
@@ -186,7 +183,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 			It("stored the input hash in the Status", func() {
 				Eventually(func(g Gomega) {
-					novaAPI := GetNovaAPI(novaAPIName)
+					novaAPI := GetNovaAPI(novaNames.APIName)
 					g.Expect(novaAPI.Status.Hash).Should(HaveKeyWithValue("input", Not(BeEmpty())))
 				}, timeout, interval).Should(Succeed())
 
@@ -195,16 +192,16 @@ var _ = Describe("NovaAPI controller", func() {
 			When("the NovaAPI is deleted", func() {
 				It("deletes the generated ConfigMaps", func() {
 					th.ExpectCondition(
-						novaAPIName,
+						novaNames.APIName,
 						ConditionGetterFunc(NovaAPIConditionGetter),
 						condition.ServiceConfigReadyCondition,
 						corev1.ConditionTrue,
 					)
 
-					DeleteInstance(GetNovaAPI(novaAPIName))
+					DeleteInstance(GetNovaAPI(novaNames.APIName))
 
 					Eventually(func() []corev1.ConfigMap {
-						return th.ListConfigMaps(novaAPIName.Name).Items
+						return th.ListConfigMaps(novaNames.APIName.Name).Items
 					}, timeout, interval).Should(BeEmpty())
 				})
 			})
@@ -214,18 +211,15 @@ var _ = Describe("NovaAPI controller", func() {
 	When("NovAPI is created with a proper Secret", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
-
-			instance := CreateNovaAPI(namespace, GetDefaultNovaAPISpec())
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, GetDefaultNovaAPISpec()))
 		})
 
 		It(" reports input ready", func() {
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.InputReadyCondition,
 				corev1.ConditionTrue,
@@ -234,34 +228,24 @@ var _ = Describe("NovaAPI controller", func() {
 	})
 
 	When("NovAPI is created", func() {
-		var statefulSetName types.NamespacedName
-
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
-
-			instance := CreateNovaAPI(namespace, GetDefaultNovaAPISpec())
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, GetDefaultNovaAPISpec()))
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ServiceConfigReadyCondition,
 				corev1.ConditionTrue,
 			)
-
-			statefulSetName = types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
 		})
 
 		It("creates a StatefulSet for the nova-api service", func() {
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.DeploymentReadyCondition,
 				corev1.ConditionFalse,
@@ -269,7 +253,7 @@ var _ = Describe("NovaAPI controller", func() {
 				condition.DeploymentReadyRunningMessage,
 			)
 
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.APIStatefulSetName)
 			Expect(int(*ss.Spec.Replicas)).To(Equal(1))
 			Expect(ss.Spec.Template.Spec.Volumes).To(HaveLen(2))
 			Expect(ss.Spec.Template.Spec.Containers).To(HaveLen(2))
@@ -287,55 +271,55 @@ var _ = Describe("NovaAPI controller", func() {
 		When("the StatefulSet has at least one Replica ready", func() {
 			BeforeEach(func() {
 				th.ExpectConditionWithDetails(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.DeploymentReadyCondition,
 					corev1.ConditionFalse,
 					condition.RequestedReason,
 					condition.DeploymentReadyRunningMessage,
 				)
-				th.SimulateStatefulSetReplicaReady(statefulSetName)
+				th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
 			})
 
 			It("reports that the StatefulSet is ready", func() {
 				th.ExpectCondition(
-					novaAPIName,
+					novaNames.APIName,
 					ConditionGetterFunc(NovaAPIConditionGetter),
 					condition.DeploymentReadyCondition,
 					corev1.ConditionTrue,
 				)
 
-				novaAPI := GetNovaAPI(novaAPIName)
+				novaAPI := GetNovaAPI(novaNames.APIName)
 				Expect(novaAPI.Status.ReadyCount).To(BeNumerically(">", 0))
 			})
 		})
 
 		It("exposes the service", func() {
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ExposeServiceReadyCondition,
 				corev1.ConditionTrue,
 			)
-			public := GetService(types.NamespacedName{Namespace: namespace, Name: "nova-public"})
+			public := GetService(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-public"})
 			Expect(public.Labels["service"]).To(Equal("nova-api"))
-			internal := GetService(types.NamespacedName{Namespace: namespace, Name: "nova-internal"})
+			internal := GetService(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-internal"})
 			Expect(internal.Labels["service"]).To(Equal("nova-api"))
-			AssertRouteExists(types.NamespacedName{Namespace: namespace, Name: "nova-public"})
+			AssertRouteExists(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-public"})
 		})
 
 		It("creates KeystoneEndpoint", func() {
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
-			th.SimulateKeystoneEndpointReady(types.NamespacedName{Namespace: namespace, Name: "nova"})
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateKeystoneEndpointReady(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova"})
 
-			keystoneEndpoint := th.GetKeystoneEndpoint(types.NamespacedName{Namespace: namespace, Name: "nova"})
+			keystoneEndpoint := th.GetKeystoneEndpoint(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova"})
 			endpoints := keystoneEndpoint.Spec.Endpoints
 			Expect(endpoints).To(HaveKeyWithValue("public", "http:/v2.1"))
-			Expect(endpoints).To(HaveKeyWithValue("internal", "http://nova-internal."+namespace+".svc:8774/v2.1"))
+			Expect(endpoints).To(HaveKeyWithValue("internal", "http://nova-internal."+novaNames.APIName.Namespace+".svc:8774/v2.1"))
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.KeystoneEndpointReadyCondition,
 				corev1.ConditionTrue,
@@ -343,11 +327,11 @@ var _ = Describe("NovaAPI controller", func() {
 		})
 
 		It("is Ready", func() {
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
-			th.SimulateKeystoneEndpointReady(types.NamespacedName{Namespace: namespace, Name: "nova"})
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateKeystoneEndpointReady(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova"})
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -355,56 +339,47 @@ var _ = Describe("NovaAPI controller", func() {
 		})
 	})
 	When("NovaAPI CR instance is deleted", func() {
-		var statefulSetName types.NamespacedName
-		var keystoneEndpointName types.NamespacedName
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
-
-			instance := CreateNovaAPI(namespace, GetDefaultNovaAPISpec())
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
-			statefulSetName = types.NamespacedName{Namespace: namespace, Name: novaAPIName.Name}
-			keystoneEndpointName = types.NamespacedName{Namespace: namespace, Name: "nova"}
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, GetDefaultNovaAPISpec()))
 		})
 
 		It("removes the finalizer from KeystoneEndpoint", func() {
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
-			th.SimulateKeystoneEndpointReady(keystoneEndpointName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
 			)
 
-			endpoint := th.GetKeystoneEndpoint(keystoneEndpointName)
+			endpoint := th.GetKeystoneEndpoint(novaNames.APIKeystoneEndpointName)
 			Expect(endpoint.Finalizers).To(ContainElement("NovaAPI"))
 
-			DeleteInstance(GetNovaAPI(novaAPIName))
-			endpoint = th.GetKeystoneEndpoint(keystoneEndpointName)
+			DeleteInstance(GetNovaAPI(novaNames.APIName))
+			endpoint = th.GetKeystoneEndpoint(novaNames.APIKeystoneEndpointName)
 			Expect(endpoint.Finalizers).NotTo(ContainElement("NovaAPI"))
 		})
 	})
 	When("NovaAPI is created with networkAttachments", func() {
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
 
 			spec := GetDefaultNovaAPISpec()
 			spec["networkAttachments"] = []string{"internalapi"}
-			instance := CreateNovaAPI(namespace, spec)
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, spec))
 		})
 
 		It("reports that the definition is missing", func() {
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -412,28 +387,24 @@ var _ = Describe("NovaAPI controller", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
 			)
 		})
 		It("reports that network attachment is missing", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.APIStatefulSetName)
 
 			expectedAnnotation, err := json.Marshal(
 				[]networkv1.NetworkSelectionElement{
 					{
 						Name:      "internalapi",
-						Namespace: namespace,
+						Namespace: novaNames.APIName.Namespace,
 					}})
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(ss.Spec.Template.ObjectMeta.Annotations).To(
@@ -442,10 +413,10 @@ var _ = Describe("NovaAPI controller", func() {
 
 			// We don't add network attachment status annotations to the Pods
 			// to simulate that the network attachments are missing.
-			SimulateStatefulSetReplicaReadyWithPods(statefulSetName, map[string][]string{})
+			SimulateStatefulSetReplicaReadyWithPods(novaNames.APIStatefulSetName, map[string][]string{})
 
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -455,21 +426,17 @@ var _ = Describe("NovaAPI controller", func() {
 			)
 		})
 		It("reports that an IP is missing", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
-			ss := th.GetStatefulSet(statefulSetName)
+			ss := th.GetStatefulSet(novaNames.APIStatefulSetName)
 
 			expectedAnnotation, err := json.Marshal(
 				[]networkv1.NetworkSelectionElement{
 					{
 						Name:      "internalapi",
-						Namespace: namespace,
+						Namespace: novaNames.APIName.Namespace,
 					}})
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(ss.Spec.Template.ObjectMeta.Annotations).To(
@@ -479,12 +446,12 @@ var _ = Describe("NovaAPI controller", func() {
 			// We simulat that there is no IP associated with the internalapi
 			// network attachment
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {}},
+				novaNames.APIStatefulSetName,
+				map[string][]string{novaNames.APIName.Namespace + "/internalapi": {}},
 			)
 
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -494,38 +461,33 @@ var _ = Describe("NovaAPI controller", func() {
 			)
 		})
 		It("reports NetworkAttachmentsReady if the Pods got the proper annotiations", func() {
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "internalapi"}
 			nad := CreateNetworkAttachmentDefinition(internalAPINADName)
 			DeferCleanup(DeleteInstance, nad)
 
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {"10.0.0.1"}},
+				novaNames.APIStatefulSetName,
+				map[string][]string{novaNames.APIName.Namespace + "/internalapi": {"10.0.0.1"}},
 			)
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionTrue,
 			)
 
 			Eventually(func(g Gomega) {
-				novaAPI := GetNovaAPI(novaAPIName)
+				novaAPI := GetNovaAPI(novaNames.APIName)
 				g.Expect(novaAPI.Status.NetworkAttachments).To(
-					Equal(map[string][]string{namespace + "/internalapi": {"10.0.0.1"}}))
+					Equal(map[string][]string{novaNames.APIName.Namespace + "/internalapi": {"10.0.0.1"}}))
 
 			}, timeout, interval).Should(Succeed())
 
-			keystoneEndpointName := types.NamespacedName{Namespace: namespace, Name: "nova"}
-			th.SimulateKeystoneEndpointReady(keystoneEndpointName)
+			th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -535,11 +497,6 @@ var _ = Describe("NovaAPI controller", func() {
 
 	When("NovaAPI is created with externalEndpoints", func() {
 		BeforeEach(func() {
-			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
-			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
-
 			spec := GetDefaultNovaAPISpec()
 			// NOTE(gibi): We need to create the data as raw list of maps
 			// to allow defaulting to happen according to the kubebuilder
@@ -554,42 +511,39 @@ var _ = Describe("NovaAPI controller", func() {
 			)
 			spec["externalEndpoints"] = externalEndpoints
 
-			instance := CreateNovaAPI(namespace, spec)
-			novaAPIName = types.NamespacedName{Name: instance.GetName(), Namespace: instance.GetNamespace()}
-			DeferCleanup(DeleteInstance, instance)
+			DeferCleanup(
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
+			DeferCleanup(
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, spec))
 		})
 
 		It("creates MetalLB service", func() {
-			statefulSetName := types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
 
-			keystoneEndpointName := types.NamespacedName{Namespace: namespace, Name: "nova"}
-			th.SimulateKeystoneEndpointReady(keystoneEndpointName)
+			th.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
 
 			// As the internal enpoint is configured in ExternalEndpoints it does not
 			// get a Route but a Service with MetalLB annotations instead
-			service := GetService(types.NamespacedName{Namespace: namespace, Name: "nova-internal"})
+			service := GetService(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-internal"})
 			Expect(service.Annotations).To(
 				HaveKeyWithValue("metallb.universe.tf/address-pool", "osp-internalapi"))
 			Expect(service.Annotations).To(
 				HaveKeyWithValue("metallb.universe.tf/allow-shared-ip", "osp-internalapi"))
 			Expect(service.Annotations).To(
 				HaveKeyWithValue("metallb.universe.tf/loadBalancerIPs", "internal-lb-ip-1,internal-lb-ip-2"))
-			AssertRouteNotExists(types.NamespacedName{Namespace: namespace, Name: "nova-internal"})
+			AssertRouteNotExists(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-internal"})
 
 			// As the public endpoint is not mentioned in the ExternalEndpoints a generic Service and
 			// a Route is created
-			service = GetService(types.NamespacedName{Namespace: namespace, Name: "nova-public"})
+			service = GetService(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-public"})
 			Expect(service.Annotations).NotTo(HaveKey("metallb.universe.tf/address-pool"))
 			Expect(service.Annotations).NotTo(HaveKey("metallb.universe.tf/allow-shared-ip"))
 			Expect(service.Annotations).NotTo(HaveKey("metallb.universe.tf/loadBalancerIPs"))
-			AssertRouteExists(types.NamespacedName{Namespace: namespace, Name: "nova-public"})
+			AssertRouteExists(types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "nova-public"})
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -598,33 +552,24 @@ var _ = Describe("NovaAPI controller", func() {
 	})
 
 	When("NovAPI is reconfigured", func() {
-		var statefulSetName types.NamespacedName
-
 		BeforeEach(func() {
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaAPISecret(namespace, SecretName))
+				k8sClient.Delete, ctx, CreateNovaAPISecret(novaNames.APIName.Namespace, SecretName))
 			DeferCleanup(
-				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(namespace, MessageBusSecretName))
-
-			api := CreateNovaAPI(namespace, GetDefaultNovaAPISpec())
-			novaAPIName = types.NamespacedName{Name: api.GetName(), Namespace: api.GetNamespace()}
-			DeferCleanup(DeleteInstance, api)
+				k8sClient.Delete, ctx, CreateNovaMessageBusSecret(novaNames.APIName.Namespace, MessageBusSecretName))
+			DeferCleanup(DeleteInstance, CreateNovaAPI(novaNames.APIName, GetDefaultNovaAPISpec()))
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ServiceConfigReadyCondition,
 				corev1.ConditionTrue,
 			)
 
-			statefulSetName = types.NamespacedName{
-				Namespace: namespace,
-				Name:      novaAPIName.Name,
-			}
-			th.SimulateStatefulSetReplicaReady(statefulSetName)
-			th.SimulateKeystoneEndpointReady(types.NamespacedName{Namespace: namespace, Name: "nova"})
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateKeystoneEndpointReady(novaNames.NovaName)
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
@@ -633,7 +578,7 @@ var _ = Describe("NovaAPI controller", func() {
 
 		It("applys new NetworkAttachments configuration", func() {
 			Eventually(func(g Gomega) {
-				novaAPI := GetNovaAPI(novaAPIName)
+				novaAPI := GetNovaAPI(novaNames.APIName)
 				novaAPI.Spec.NetworkAttachments = append(novaAPI.Spec.NetworkAttachments, "internalapi")
 
 				err := k8sClient.Update(ctx, novaAPI)
@@ -641,7 +586,7 @@ var _ = Describe("NovaAPI controller", func() {
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -649,7 +594,7 @@ var _ = Describe("NovaAPI controller", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -657,11 +602,11 @@ var _ = Describe("NovaAPI controller", func() {
 				"NetworkAttachment resources missing: internalapi",
 			)
 
-			internalAPINADName := types.NamespacedName{Namespace: namespace, Name: "internalapi"}
+			internalAPINADName := types.NamespacedName{Namespace: novaNames.APIName.Namespace, Name: "internalapi"}
 			DeferCleanup(DeleteInstance, CreateNetworkAttachmentDefinition(internalAPINADName))
 
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionFalse,
@@ -670,7 +615,7 @@ var _ = Describe("NovaAPI controller", func() {
 					"not all pods have interfaces with ips as configured in NetworkAttachments: [internalapi]",
 			)
 			th.ExpectConditionWithDetails(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionFalse,
@@ -680,26 +625,26 @@ var _ = Describe("NovaAPI controller", func() {
 			)
 
 			SimulateStatefulSetReplicaReadyWithPods(
-				statefulSetName,
-				map[string][]string{namespace + "/internalapi": {"10.0.0.1"}},
+				novaNames.APIStatefulSetName,
+				map[string][]string{novaNames.APIName.Namespace + "/internalapi": {"10.0.0.1"}},
 			)
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.NetworkAttachmentsReadyCondition,
 				corev1.ConditionTrue,
 			)
 
 			Eventually(func(g Gomega) {
-				novaAPI := GetNovaAPI(novaAPIName)
+				novaAPI := GetNovaAPI(novaNames.APIName)
 				g.Expect(novaAPI.Status.NetworkAttachments).To(
-					Equal(map[string][]string{namespace + "/internalapi": {"10.0.0.1"}}))
+					Equal(map[string][]string{novaNames.APIName.Namespace + "/internalapi": {"10.0.0.1"}}))
 
 			}, timeout, interval).Should(Succeed())
 
 			th.ExpectCondition(
-				novaAPIName,
+				novaNames.APIName,
 				ConditionGetterFunc(NovaAPIConditionGetter),
 				condition.ReadyCondition,
 				corev1.ConditionTrue,
