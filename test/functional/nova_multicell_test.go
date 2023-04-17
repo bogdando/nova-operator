@@ -28,9 +28,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-var _ = Describe("Nova multicell", Ordered, func() {
+var _ = Describe("Nova multicell", func() {
 	When("Nova CR instance is created with 3 cells", func() {
-		BeforeAll(func() {
+		BeforeEach(func() {
 			// TODO(bogdando): deduplicate this into CreateNovaWith3CellsAndEnsureReady()
 			DeferCleanup(k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
@@ -451,8 +451,8 @@ var _ = Describe("Nova multicell", Ordered, func() {
 		})
 	})
 
-	When("Nova CR instance is created with collapsed cell deployment", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is created with collapsed cell deployment", func() {
+		BeforeEach(func() {
 			DeferCleanup(k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
 				k8sClient.Delete,

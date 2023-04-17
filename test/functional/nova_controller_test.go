@@ -29,8 +29,8 @@ import (
 )
 
 var _ = Describe("Nova controller", func() {
-	When("Nova CR instance is created without cell0", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is created without cell0", func() {
+		BeforeEach(func() {
 			DeferCleanup(DeleteInstance, CreateNovaWithoutCell0(novaNames.NovaName))
 		})
 
@@ -63,8 +63,8 @@ var _ = Describe("Nova controller", func() {
 		})
 	})
 
-	When("Nova CR instance is created", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is created", func() {
+		BeforeEach(func() {
 			DeferCleanup(
 				k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
@@ -317,8 +317,8 @@ var _ = Describe("Nova controller", func() {
 		})
 	})
 
-	When("Nova CR instance is created but cell0 DB sync fails", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is created but cell0 DB sync fails", func() {
+		BeforeEach(func() {
 			DeferCleanup(
 				k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
@@ -392,8 +392,8 @@ var _ = Describe("Nova controller", func() {
 		})
 	})
 
-	When("Nova CR instance with different DB Services for nova_api and cell0 DBs", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance with different DB Services for nova_api and cell0 DBs", func() {
+		BeforeEach(func() {
 			DeferCleanup(
 				k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
@@ -537,8 +537,8 @@ var _ = Describe("Nova controller", func() {
 		})
 	})
 
-	When("Nova CR instance is deleted", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is deleted", func() {
+		BeforeEach(func() {
 			DeferCleanup(
 				k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(
@@ -601,8 +601,8 @@ var _ = Describe("Nova controller", func() {
 		})
 	})
 
-	When("Nova CR instance is created with NetworkAttachment and ExternalEndpoints", Ordered, func() {
-		BeforeAll(func() {
+	When("Nova CR instance is created with NetworkAttachment and ExternalEndpoints", func() {
+		BeforeEach(func() {
 			DeferCleanup(
 				k8sClient.Delete, ctx, CreateNovaSecret(novaNames.NovaName.Namespace, SecretName))
 			DeferCleanup(

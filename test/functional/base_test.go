@@ -18,7 +18,6 @@ package functional_test
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -732,16 +731,19 @@ func GetNovaNames(novaName types.NamespacedName, cellNames []string) NovaNames {
 		ComputeName: computeExt,
 		KeystoneServiceName: types.NamespacedName{
 			Namespace: novaName.Namespace,
-			Name:      "nova", // a static keystone endpoint name for nova
+			Name:      "nova", // static value hardcoded in controller code
 		},
 		APIName: novaAPI,
 		APIMariaDBDatabaseName: types.NamespacedName{
 			Namespace: novaAPI.Namespace,
 			Name:      "nova-api", // a static DB name for nova
 		},
-		APIDeploymentName:       novaAPI,
-		APIKeystoneEndpointName: novaName,
-		APIStatefulSetName:      novaAPI,
+		APIDeploymentName: novaAPI,
+		APIKeystoneEndpointName: types.NamespacedName{
+			Namespace: novaName.Namespace,
+			Name:      "nova", // a static keystone endpoint name for nova
+		},
+		APIStatefulSetName: novaAPI,
 		APIConfigDataName: types.NamespacedName{ // TODO replace configDataMap for API
 			Namespace: novaAPI.Namespace,
 			Name:      novaAPI.Name + "-config-data",

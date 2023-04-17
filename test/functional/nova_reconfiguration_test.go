@@ -135,8 +135,8 @@ func CreateNovaWith3CellsAndEnsureReady(novaNames NovaNames) {
 	)
 }
 
-var _ = Describe("Nova reconfiguration", Ordered, func() {
-	BeforeAll(func() {
+var _ = Describe("Nova reconfiguration", func() {
+	BeforeEach(func() {
 		// Uncomment this if you need the full output in the logs from gomega
 		// matchers
 		// format.MaxLength = 0
